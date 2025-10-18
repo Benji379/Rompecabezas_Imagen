@@ -1,0 +1,379 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <title>Rompecabezas</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root{
+      --gap: 16px;            /* separación exterior respecto a la tarjeta */
+      --max-width: 500px;     /* ancho del puzzle (editable con el input) */
+
+      --bg:#ffffff; --outline-int:#000; --hover-raise:-4px;
+      --card-radius: 14px; --board-radius: 10px;
+      --ui-gap: 12px; --primary:#0ea5e9; --text-muted:#64748b; --border:#e5e7eb;
+    }
+    *{ box-sizing:border-box; }
+    html, body{ height:100%; margin:0; }
+    body{
+      background:#fff; color:#0f172a; font-family: system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial,sans-serif;
+      display:grid; grid-template-rows:auto 1fr; justify-items:center; align-items:start; padding:16px; gap:18px;
+    }
+
+    /* ───────── Controles superiores ───────── */
+    .uploader{ display:flex; flex-wrap:wrap; align-items:center; gap:var(--ui-gap); width:min(100%,1100px); }
+    .file{ display:flex; align-items:center; gap:10px; padding:8px 12px; border:1px solid var(--border); border-radius:12px; background:#fff; box-shadow:0 4px 12px rgba(0,0,0,.05); }
+    .file input[type=file]{ display:none; }
+    .file .btn{ padding:8px 10px; border-radius:8px; background:var(--primary); color:#fff; font-weight:700; border:1px solid var(--primary); cursor:pointer; }
+    .file .label{ font-weight:700; font-size:14px; color:#0f172a; }
+    .file .filename{ max-width:320px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:var(--text-muted); font-size:12px; }
+    .number{ display:flex; align-items:center; gap:8px; padding:8px 12px; border:1px solid var(--border); border-radius:12px; background:#fff; box-shadow:0 4px 12px rgba(0,0,0,.05); font-weight:700; font-size:14px; }
+    .number input{ width:110px; padding:8px 10px; border:1px solid var(--border); border-radius:8px; font-weight:600; }
+    .uploader button[type=submit]{ padding:10px 14px; border-radius:12px; border:1px solid var(--primary); background:var(--primary); color:#fff; font-weight:800; cursor:pointer; box-shadow:0 8px 18px rgba(14,165,233,.25); }
+    .status{ font-size:13px; color:var(--text-muted); } .error{ color:#b91c1c; font-weight:700; }
+
+    /* ───────── Escenario (aporta la separación externa) ───────── */
+    .stage{ padding:var(--gap); }
+    .hidden{ display:none !important; }
+
+    /* ───────── Tarjeta con sombra = MISMO tamaño que el puzzle ───────── */
+    .card{
+      position:relative;
+      display:inline-block;
+      background:#fff;
+      border:1px solid var(--border);
+      border-radius: var(--card-radius);
+      box-shadow:0 8px 24px rgba(0,0,0,.06), inset 0 0 0 1px rgba(0,0,0,.02);
+      /* sin padding -> mismo tamaño que #board */
+    }
+
+    /* Tablero = tamaño EXACTO del rompecabezas */
+    #board{
+      position:relative;
+      width:min(100vw, var(--max-width));
+      background:var(--bg);
+      border-radius: var(--board-radius);
+      overflow:hidden;
+      user-select:none;
+    }
+
+    .targets{ position:absolute; inset:0; pointer-events:none; display:none; }
+    .pieces { position:absolute; inset:0; }
+    .labels { position:absolute; inset:0; pointer-events:none; }
+
+    .piece{
+      position:absolute; -webkit-user-drag:none; user-select:none; pointer-events:auto; cursor:pointer; z-index:1;
+      filter:drop-shadow(0 0 0 var(--outline-int)) drop-shadow(0 0 0 var(--outline-int));
+      transition: transform .15s ease, filter .15s ease, z-index .15s ease; will-change: transform;
+    }
+    .piece:hover{
+      transform:translateY(var(--hover-raise));
+      filter:drop-shadow(0 0 0 var(--outline-int)) drop-shadow(0 0 0 var(--outline-int)) drop-shadow(0 10px 16px rgba(0,0,0,.20));
+      z-index:5;
+    }
+    .mask-outer{ position:absolute; inset:0; pointer-events:none; border-radius:var(--board-radius); box-shadow: inset 0 0 0 2px var(--bg); }
+
+    /* Etiquetas de índice */
+    .label{
+      position:absolute; display:flex; align-items:center; justify-content:center;
+      font-weight:800; font-size:18px; color:#fff; text-shadow:0 0 3px rgba(0,0,0,.8), 0 0 8px rgba(0,0,0,.6);
+      opacity:0; transition:opacity .15s ease;
+    }
+    .labels.show .label{ opacity:1; }
+
+    /* Botón engranaje */
+    .gear{
+      position:absolute; top:8px; right:8px; z-index:10;
+      background:#fff; border:1px solid var(--border); border-radius:999px; padding:8px 10px;
+      box-shadow:0 4px 12px rgba(0,0,0,.12); cursor:pointer; font-weight:800;
+    }
+
+    /* Panel lateral (drawer) */
+    .drawer{
+      position:fixed; top:0; right:0; height:100%; width:min(420px, 90vw);
+      background:#fff; border-left:1px solid var(--border); box-shadow:-12px 0 32px rgba(0,0,0,.18);
+      transform:translateX(100%); transition:transform .25s ease; z-index:50; display:flex; flex-direction:column;
+    }
+    .drawer.open{ transform:translateX(0); }
+    .drawer header{ padding:16px; font-weight:800; border-bottom:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; }
+    .drawer .body{ padding:16px; overflow:auto; }
+    .row{ display:flex; align-items:center; gap:10px; margin-bottom:10px; }
+    .row span{ width:64px; font-weight:700; }
+    .row input[type=url]{ flex:1; padding:8px 10px; border:1px solid var(--border); border-radius:8px; }
+    .row small{ color:var(--text-muted); }
+
+    .btn-secondary{
+      background:#eef6ff; color:#0b6acb; border:1px solid #bcd7ff; padding:8px 10px; border-radius:8px; font-weight:700; cursor:pointer;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Controles -->
+  <form class="uploader" id="formUpload">
+    <div class="file">
+      <span class="label">SVG de piezas</span>
+      <button class="btn" type="button" id="btnSvg">Seleccionar</button>
+      <span class="filename" id="nameSvg">Ningún archivo</span>
+      <input type="file" id="svgInput" name="svg" accept=".svg,image/svg+xml" required />
+    </div>
+    <div class="file">
+      <span class="label">PNG de imagen</span>
+      <button class="btn" type="button" id="btnPng">Seleccionar</button>
+      <span class="filename" id="namePng">Ningún archivo</span>
+      <input type="file" id="pngInput" name="png" accept=".png,image/png" required />
+    </div>
+    <div class="number">
+      <label for="puzzleWidth">Ancho (px)</label>
+      <input type="number" id="puzzleWidth" min="240" max="2000" step="10" value="500" />
+    </div>
+    <div class="number">
+      <label for="puzzleGap">Separación (px)</label>
+      <input type="number" id="puzzleGap" min="0" max="80" step="2" value="16" />
+    </div>
+    <button type="submit">Construir rompecabezas</button>
+    <span id="msg" class="status"></span>
+  </form>
+
+  <!-- Escenario + tarjeta (mismo tamaño que el board) -->
+  <div class="stage hidden" id="stage">
+    <div class="card" id="card">
+      <button class="gear hidden" id="gear" title="Configuración">⚙︎</button>
+
+      <div id="board" aria-label="Tablero del rompecabezas">
+        <div class="targets" id="targets"></div>
+        <div class="pieces"  id="pieces"></div>
+        <div class="labels"  id="labels"></div>
+        <div class="mask-outer" aria-hidden="true"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Panel lateral -->
+  <aside class="drawer" id="drawer">
+    <header>
+      <div>⚙️ Configuración</div>
+      <button class="btn-secondary" id="toggleIdx">Marcar índices</button>
+    </header>
+    <div class="body">
+      <h4>Enlaces por pieza</h4>
+      <div id="linksForm"></div>
+      <small>Los enlaces se guardan en tu navegador (localStorage) por puzzle.</small>
+    </div>
+  </aside>
+
+  <script>
+    /* === File choosers bonitos === */
+    const btnSvg = document.getElementById('btnSvg');
+    const btnPng = document.getElementById('btnPng');
+    const svgInput = document.getElementById('svgInput');
+    const pngInput = document.getElementById('pngInput');
+    const nameSvg = document.getElementById('nameSvg');
+    const namePng = document.getElementById('namePng');
+    btnSvg.addEventListener('click', () => svgInput.click());
+    btnPng.addEventListener('click', () => pngInput.click());
+    svgInput.addEventListener('change', () => nameSvg.textContent = svgInput.files[0]?.name || 'Ningún archivo');
+    pngInput.addEventListener('change', () => namePng.textContent = pngInput.files[0]?.name || 'Ningún archivo');
+
+    /* === DOM puzzle === */
+    const form = document.getElementById('formUpload');
+    const msg  = document.getElementById('msg');
+    const stage= document.getElementById('stage');
+    const card = document.getElementById('card');
+    const gear = document.getElementById('gear');
+    const drawer = document.getElementById('drawer');
+    const toggleIdxBtn = document.getElementById('toggleIdx');
+    const linksForm = document.getElementById('linksForm');
+
+    const BOARD = document.getElementById('board');
+    const LAYER_TARGETS = document.getElementById('targets');
+    const LAYER_PIECES  = document.getElementById('pieces');
+    const LAYER_LABELS  = document.getElementById('labels');
+
+    const puzzleWidth = document.getElementById('puzzleWidth');
+    const puzzleGap   = document.getElementById('puzzleGap');
+
+    // variables CSS iniciales
+    const setWidth = v => document.documentElement.style.setProperty('--max-width', v + 'px');
+    const setGap   = v => document.documentElement.style.setProperty('--gap', v + 'px');
+    setWidth(puzzleWidth.value); setGap(puzzleGap.value);
+    puzzleWidth.addEventListener('input', () => setWidth(puzzleWidth.value));
+    puzzleGap  .addEventListener('input', () => setGap(puzzleGap.value));
+
+    let MAP = null;
+    let pieceLinks = {};   // id -> url
+    let linksKey = null;   // clave en localStorage para este puzzle
+
+    function keyForMap(map){
+      // Una clave estable por puzzle (dimensiones + #piezas)
+      return `puzzleLinks:${map.canvas?.width}x${map.canvas?.height}:${map.pieces?.length}`;
+    }
+
+    // Canvas completo del JSON => tamaño exacto
+    function setBoardAspect(){
+      const { width, height } = MAP.canvas || { width: 1, height: 1 };
+      BOARD.style.aspectRatio = `${width} / ${height}`;
+      // La tarjeta toma exactamente el mismo tamaño del board
+      // (card no tiene padding; el stage aporta la 'separación')
+      requestAnimationFrame(() => {
+        card.style.width = BOARD.clientWidth + 'px';
+        card.style.height = BOARD.clientHeight + 'px';
+      });
+    }
+
+    function renderTargets(hidden = true){
+      LAYER_TARGETS.innerHTML = '';
+      for(const p of MAP.pieces){
+        const t = document.createElement('div');
+        t.className = 'target';
+        Object.assign(t.style, {
+          left:   (p.nx * 100) + '%',
+          top:    (p.ny * 100) + '%',
+          width:  (p.nw * 100) + '%',
+          height: (p.nh * 100) + '%'
+        });
+        LAYER_TARGETS.appendChild(t);
+      }
+      LAYER_TARGETS.style.display = hidden ? 'none' : 'block';
+    }
+
+    function renderLabels(){
+      LAYER_LABELS.innerHTML = '';
+      for(const p of MAP.pieces){
+        const d = document.createElement('div');
+        d.className = 'label';
+        d.textContent = p.id;
+        Object.assign(d.style, {
+          left:   (p.nx * 100) + '%',
+          top:    (p.ny * 100) + '%',
+          width:  (p.nw * 100) + '%',
+          height: (p.nh * 100) + '%'
+        });
+        LAYER_LABELS.appendChild(d);
+      }
+    }
+
+    function placeAllPiecesOrdered(basePath){
+      LAYER_PIECES.innerHTML = '';
+      for(const p of MAP.pieces){
+        const img = document.createElement('img');
+        img.className = 'piece';
+        img.dataset.id = p.id;
+        img.src = `${basePath}/${p.file}?t=${Date.now()}`;
+        img.alt = `Pieza ${p.id}`;
+        Object.assign(img.style, {
+          left:   (p.nx * 100) + '%',
+          top:    (p.ny * 100) + '%',
+          width:  (p.nw * 100) + '%',
+          height: (p.nh * 100) + '%'
+        });
+        LAYER_PIECES.appendChild(img);
+      }
+    }
+
+    // Click en pieza => abrir enlace si existe
+    LAYER_PIECES.addEventListener('click', (e) => {
+      const el = e.target.closest('img.piece');
+      if(!el) return;
+      const id = el.dataset.id;
+      const url = pieceLinks[id];
+      if(url && /^https?:\/\//i.test(url)) window.open(url, '_blank', 'noopener,noreferrer');
+    });
+
+    // Panel lateral
+    function buildDrawer(){
+      linksForm.innerHTML = '';
+      const byId = [...MAP.pieces].sort((a,b)=>a.id-b.id);
+      byId.forEach(p => {
+        const row = document.createElement('div');
+        row.className = 'row';
+        const lab = document.createElement('span');
+        lab.textContent = `Pieza ${p.id}`;
+        const inp = document.createElement('input');
+        inp.type = 'url';
+        inp.placeholder = 'https://...';
+        inp.value = pieceLinks[p.id] || '';
+        inp.addEventListener('input', () => {
+          pieceLinks[p.id] = inp.value.trim();
+          localStorage.setItem(linksKey, JSON.stringify(pieceLinks));
+        });
+        row.appendChild(lab); row.appendChild(inp);
+        linksForm.appendChild(row);
+      });
+    }
+
+    function openDrawer(){ drawer.classList.add('open'); }
+    function closeDrawer(){ drawer.classList.remove('open'); }
+
+    gear.addEventListener('click', openDrawer);
+    drawer.addEventListener('click', (e)=> {
+      if(e.target === drawer) closeDrawer();
+    });
+
+    // Marcar/Desmarcar índices
+    let showIdx = false;
+    toggleIdxBtn.addEventListener('click', () => {
+      showIdx = !showIdx;
+      LAYER_LABELS.classList.toggle('show', showIdx);
+      toggleIdxBtn.textContent = showIdx ? 'Desmarcar índices' : 'Marcar índices';
+    });
+
+    async function loadAndRender(mapUrl){
+      const res = await fetch(mapUrl, { cache: 'no-store' });
+      if(!res.ok) throw new Error('No pude leer pieces_map.json');
+      MAP = await res.json();
+
+      // Config tamaño exacto y render
+      setBoardAspect();
+      renderTargets(true);
+      placeAllPiecesOrdered('/piezas_out');
+      renderLabels();
+
+      // Mostrar escenario + engranaje
+      stage.classList.remove('hidden');
+      gear.classList.remove('hidden');
+
+      // Cargar enlaces guardados (por puzzle)
+      linksKey = keyForMap(MAP);
+      try{
+        pieceLinks = JSON.parse(localStorage.getItem(linksKey) || '{}') || {};
+      }catch{ pieceLinks = {}; }
+      buildDrawer();
+
+      // Ajustar tarjeta al tamaño del board on resize
+      new ResizeObserver(()=> {
+        card.style.width = BOARD.clientWidth + 'px';
+        card.style.height = BOARD.clientHeight + 'px';
+      }).observe(BOARD);
+    }
+
+    // Envío del formulario
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      msg.classList.remove('error');
+      msg.textContent = 'Procesando…';
+      stage.classList.add('hidden');
+
+      if(!svgInput.files[0] || !pngInput.files[0]){
+        msg.textContent = 'Selecciona un SVG y un PNG.';
+        return;
+      }
+      const fd = new FormData();
+      fd.append('svg', svgInput.files[0]);
+      fd.append('png', pngInput.files[0]);
+
+      try{
+        const r = await fetch('/api/build', { method:'POST', body: fd });
+        const data = await r.json();
+        if(!r.ok || !data.ok) throw new Error(data.error || 'Error desconocido');
+        msg.textContent = `Listo: ${data.exported} piezas`;
+        await loadAndRender(data.map_url);
+      }catch(err){
+        console.error(err);
+        msg.textContent = 'Error: ' + err.message;
+        msg.classList.add('error');
+      }
+    });
+  </script>
+</body>
+</html>
